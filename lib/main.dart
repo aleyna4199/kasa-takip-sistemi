@@ -36,15 +36,84 @@ class _AnaSayfaState extends State<AnaSayfa> {
   double _toplamGelir = 0.0;
   double _toplamGider = 0.0;
 
+  // Filtreleme için değişken (null = Tüm Zamanlar, 'YYYY-MM' = Ay, 'YYYY-MM-DD' = Gün)
+  String? _secilenFiltre;
+  List<String> _filtrelenebilirDonemler = [];
+
   @override
   void initState() {
     super.initState();
-    _verileriYukle();
+    _verileriVeDonemleriYukle();
   }
 
-  Future<void> _verileriYukle() async {
+  // Türkçe ay ve gün isimlerini düzenli göstermek için yardımcı fonksiyon
+  String _donemiFormatla(String donem) {
     try {
-      final veriler = await DatabaseHelper.instance.getTransactions();
+      if (donem.length == 7) {
+        // Örn: "2026-07" -> "Temmuz 2026"
+        List<String> parcalar = donem.split('-');
+        int yil = int.parse(parcalar[0]);
+        int ay = int.parse(parcalar[1]);
+        
+        const aylar = [
+          '', 'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 
+          'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'
+        ];
+        return '${aylar[ay]} $yil';
+      } else if (donem.length == 10) {
+        // Örn: "2026-07-24" -> "24 Temmuz 2026"
+        List<String> parcalar = donem.split('-');
+        int yil = int.parse(parcalar[0]);
+        int ay = int.parse(parcalar[1]);
+        int gun = int.parse(parcalar[2]);
+        
+        const aylar = [
+          '', 'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 
+          'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'
+        ];
+        return '$gun ${aylar[ay]} $yil (Günlük)';
+      }
+    } catch (e) {
+      // Hata durumunda orijinal metni döndür
+    }
+    return donem;
+  }
+
+  Future<void> _verileriVeDonemleriYukle() async {
+    try {
+      // 1. Tüm işlemleri çekerek veritabanındaki benzersiz ayları VE günleri tespit edelim
+      List<Map<String, dynamic>> tumVeriler = await DatabaseHelper.instance.getTransactions();
+      
+      Set<String> donemSeti = {};
+      for (var item in tumVeriler) {
+        String tarih = item['date'].toString(); // Beklenen format: YYYY-MM-DD
+        if (tarih.length >= 7) {
+          donemSeti.add(tarih.substring(0, 7)); // Ay bazlı ekle (Örn: 2026-07)
+        }
+        if (tarih.length == 10) {
+          donemSeti.add(tarih); // Gün bazlı da ekle (Örn: 2026-07-24)
+        }
+      }
+
+      setState(() {
+        // Yeniden eskiye doğru sıralama
+        _filtrelenebilirDonemler = donemSeti.toList()..sort((a, b) => b.compareTo(a));
+      });
+
+      // 2. Seçili filtreye göre ana listeyi doldur
+      List<Map<String, dynamic>> veriler;
+      if (_secilenFiltre != null && _secilenFiltre!.isNotEmpty) {
+        if (_secilenFiltre!.length == 7) {
+          // Ay seçildiyse
+          veriler = await DatabaseHelper.instance.getTransactionsByMonth(_secilenFiltre!);
+        } else {
+          // Gün seçildiyse (YYYY-MM-DD)
+          veriler = tumVeriler.where((element) => element['date'] == _secilenFiltre).toList();
+        }
+      } else {
+        veriler = tumVeriler;
+      }
+
       double gelir = 0;
       double gider = 0;
 
@@ -140,7 +209,7 @@ class _AnaSayfaState extends State<AnaSayfa> {
                           'date': DateTime.now().toString().split(' ')[0],
                         });
                         Navigator.pop(context);
-                        await _verileriYukle();
+                        await _verileriVeDonemleriYukle();
                       }
                     }
                   },
@@ -156,7 +225,7 @@ class _AnaSayfaState extends State<AnaSayfa> {
 
   Future<void> _islemSil(int id) async {
     await DatabaseHelper.instance.deleteTransaction(id);
-    _verileriYukle();
+    _verileriVeDonemleriYukle();
   }
 
   @override
@@ -168,9 +237,49 @@ class _AnaSayfaState extends State<AnaSayfa> {
       ),
       body: Column(
         children: [
+          // Gelişmiş Ay/Gün/Dönem Filtreleme Dropdown Alanı
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            child: Row(
+              children: [
+                const Text('Filtrele: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: DropdownButtonFormField<String?>(
+                    value: _secilenFiltre,
+                    decoration: InputDecoration(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      filled: true,
+                      fillColor: Colors.grey.shade50,
+                    ),
+                    hint: const Text('Tüm Zamanlar'),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Tüm Zamanlar'),
+                      ),
+                      ..._filtrelenebilirDonemler.map((donem) {
+                        return DropdownMenuItem<String?>(
+                          value: donem,
+                          child: Text(_donemiFormatla(donem)),
+                        );
+                      }),
+                    ],
+                    onChanged: (String? yeniDeger) {
+                      setState(() {
+                        _secilenFiltre = yeniDeger;
+                      });
+                      _verileriVeDonemleriYukle();
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
           Container(
             padding: const EdgeInsets.all(16),
-            margin: const EdgeInsets.all(16),
+            margin: const EdgeInsets.symmetric(horizontal: 16),
             decoration: BoxDecoration(
               color: Colors.blue.shade50,
               borderRadius: BorderRadius.circular(12),
@@ -186,19 +295,18 @@ class _AnaSayfaState extends State<AnaSayfa> {
             ),
           ),
           const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16.0),
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                'Son İşlemler',
+                'İşlem Listesi',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
             ),
           ),
-          const SizedBox(height: 8),
           Expanded(
             child: _islemListesi.isEmpty
-                ? const Center(child: Text('Henüz işlem eklenmemiş.'))
+                ? const Center(child: Text('Bu dönemde kayıt bulunamadı.'))
                 : ListView.builder(
                     itemCount: _islemListesi.length,
                     itemBuilder: (context, index) {
@@ -215,7 +323,7 @@ class _AnaSayfaState extends State<AnaSayfa> {
                             ),
                           ),
                           title: Text(islem['title']),
-                          subtitle: Text(islem['date']),
+                          subtitle: Text(_donemiFormatla(islem['date'])),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [

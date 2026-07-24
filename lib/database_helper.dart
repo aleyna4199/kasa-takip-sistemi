@@ -53,6 +53,18 @@ class DatabaseHelper {
     return await db.query('transactions', orderBy: 'id DESC');
   }
 
+  // --- YENİ EKLEYECEĞİMİZ FONKSİYON ---
+  Future<List<Map<String, dynamic>>> getTransactionsByMonth(String yearMonth) async {
+    final db = await instance.database;
+    return await db.query(
+      'transactions',
+      where: "date LIKE ?",
+      whereArgs: ['$yearMonth%'],
+      orderBy: 'id DESC',
+    );
+  }
+  // -----------------------------------
+
   Future<int> deleteTransaction(int id) async {
     final db = await instance.database;
     return await db.delete(
